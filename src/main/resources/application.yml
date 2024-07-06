@@ -1,0 +1,86 @@
+scheme: http
+hostname: localhost
+reverse-proxy-port: 7080
+reverse-proxy-uri: ${scheme}://${hostname}:${reverse-proxy-port}
+
+issuer: http://localhost:8080/realms/ronaldofarrapo
+client-id: sso-gateway
+client-secret: q3PYvgJmj8qbpjmRQe3gUtcSdoz5wlDb
+username-claim-json-path: $.preferred_username
+authorities-json-path: $.realm_access.roles
+bff-port: 7081
+bff-prefix: /bff
+sso-ui-prefix: /sso-ui
+resource-server-port: 7084
+audience:
+
+server:
+  port: ${bff-port}
+
+spring:
+  application:
+    name: gateway-sso-app
+
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            authorization-grant-type: authorization_code
+            client-id: ${client-id}
+            client-secret: ${client-secret}
+            scope: openid,profile,email,offline_access
+        provider:
+          keycloak:
+            issuer-uri: ${issuer}
+
+  cloud:
+    gateway:
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+
+      routes:
+        - id: bff
+          uri: ${scheme}://${hostname}:${resource-server-port}
+          predicates:
+            - Path=/api/**
+          filters:
+            - TokenRelay=
+            - SaveSession
+            - StripPrefix=1
+
+com:
+  c4-soft:
+    springaddons:
+      oidc:
+        ops:
+          - iss: ${issuer}
+            authorities:
+              - path: ${authorities-json-path}
+            aud: ${audience}
+        # SecurityFilterChain with oauth2Login() (sessions and CSRF protection enabled)
+        client:
+          client-uri: ${reverse-proxy-uri}${bff-prefix}
+          security-matchers:
+            - /api/**
+            - /login/**
+            - /oauth2/**
+            - /logout
+          permit-all:
+            - /api/**
+            - /login/**
+            - /oauth2/**
+          post-logout-redirect-host: ${hostname}
+          csrf: cookie-accessible-from-js
+          oauth2-redirections:
+            rp-initiated-logout: ACCEPTED
+          back-channel-logout:
+            enabled: true
+        # SecurityFilterChain with oauth2ResourceServer() (sessions and CSRF protection disabled)
+        resourceserver:
+          permit-all:
+            - /login-options
+            - /error
+            - /actuator/health/readiness
+            - /actuator/health/liveness
